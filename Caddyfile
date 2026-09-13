@@ -1,0 +1,130 @@
+# OneHealth Caddy Configuration
+# Auto-HTTPS with Let's Encrypt (production) or self-signed (local)
+
+{
+    # Global options
+    admin off
+    # Email for Let's Encrypt (set in production)
+    # email admin@onehealth.example.com
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Development / Local (HTTP only, no TLS)
+# ──────────────────────────────────────────────────────────────────────────────
+
+:80 {
+    # CORS Headers
+    @cors_preflight method OPTIONS
+    handle @cors_preflight {
+        header Access-Control-Allow-Origin "*"
+        header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        header Access-Control-Allow-Headers "*"
+        respond "" 204
+    }
+
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    header Access-Control-Allow-Headers "*"
+
+    # Web frontend (Landing + Patient PWA)
+    handle_path /web/* {
+        reverse_proxy web:3000
+    }
+
+    handle_path /pwa/* {
+        reverse_proxy web:3000
+    }
+
+    # Landing page at root
+    handle {
+        reverse_proxy web:3000
+    }
+
+    # Auth service
+    handle /api/auth/* {
+        uri strip_prefix /api
+        reverse_proxy auth-svc:5000
+    }
+
+    # Identity service (patient lookup, biometrics)
+    handle /api/identity/* {
+        uri strip_prefix /api
+        reverse_proxy identity-svc:5001
+    }
+
+    # Dashboard service (doctor dashboard)
+    handle /api/dashboard/* {
+        uri strip_prefix /api
+        reverse_proxy dashboard-svc:3001
+    }
+
+    # Intake AI service (symptom triage)
+    handle /api/intake/* {
+        uri strip_prefix /api
+        reverse_proxy intake-ai-svc:5002
+    }
+
+    # Reminder service
+    handle /api/reminders/* {
+        uri strip_prefix /api
+        reverse_proxy reminder-svc:5003
+    }
+
+    # Prediction service
+    handle /api/predictions/* {
+        uri strip_prefix /api
+        reverse_proxy prediction-svc:5004
+    }
+
+    # Health checks
+    handle_path /health/* {
+        respond "OK" 200
+    }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Production (HTTPS with automatic Let's Encrypt)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Uncomment and configure for production:
+#
+# onehealth.example.com {
+#     # Web frontend
+#     handle_path /web/* {
+#         reverse_proxy web:3000
+#     }
+#
+#     handle_path /pwa/* {
+#         reverse_proxy web:3000
+#     }
+#
+#     handle_path / {
+#         reverse_proxy web:3000
+#     }
+#
+#     # API routes
+#     handle_path /auth/* {
+#         reverse_proxy auth-svc:5000
+#     }
+#
+#     handle_path /api/* {
+#         reverse_proxy identity-svc:5001
+#     }
+#
+#     # Security headers
+#     header {
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+#         X-Content-Type-Options "nosniff"
+#         X-Frame-Options "DENY"
+#         Referrer-Policy "strict-origin-when-cross-origin"
+#         Permissions-Policy "camera=(), microphone=(), geolocation=()"
+#     }
+#
+#     # Rate limiting for auth endpoints
+#     @auth_rate {
+#         path /auth/token /auth/register
+#     }
+#     rate_limit @auth_rate {
+#         zone auth_limit 10r/m
+#     }
+# }

@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 255 255 255;
+    --foreground: 17 17 19;
+    --card: 250 250 251;
+    --card-foreground: 17 17 19;
+    --primary: 0 136 255;
+    --primary-foreground: 255 255 255;
+    --secondary: 0 194 203;
+    --muted: 244 244 247;
+    --muted-foreground: 82 82 91;
+    --border: 228 228 233;
+    --ring: 0 136 255;
+  }
+
+  .dark {
+    --background: 17 17 19;
+    --foreground: 250 250 251;
+    --card: 39 39 42;
+    --card-foreground: 250 250 251;
+    --muted: 33 33 36;
+    --border: 55 55 60;
+  }
+
+  /* ── Health Theme: Calm Blue (default, same as :root) ── */
+  .theme-blue {
+    --primary: 14 165 233;
+    --primary-foreground: 255 255 255;
+    --secondary: 56 189 248;
+    --ring: 14 165 233;
+  }
+  .dark.theme-blue {
+    --primary: 56 189 248;
+    --secondary: 125 211 252;
+  }
+
+  /* ── Health Theme: Forest Green ── */
+  .theme-green {
+    --primary: 22 163 74;
+    --primary-foreground: 255 255 255;
+    --secondary: 74 222 128;
+    --ring: 22 163 74;
+  }
+  .dark.theme-green {
+    --primary: 74 222 128;
+    --secondary: 134 239 172;
+  }
+
+  /* ── Health Theme: Midnight Purple ── */
+  .theme-purple {
+    --primary: 124 58 237;
+    --primary-foreground: 255 255 255;
+    --secondary: 167 139 250;
+    --ring: 124 58 237;
+  }
+  .dark.theme-purple {
+    --primary: 167 139 250;
+    --secondary: 196 181 253;
+  }
+
+  /* ── Health Theme: Warm Amber ── */
+  .theme-amber {
+    --primary: 217 119 6;
+    --primary-foreground: 255 255 255;
+    --secondary: 251 191 36;
+    --ring: 217 119 6;
+  }
+  .dark.theme-amber {
+    --primary: 251 191 36;
+    --secondary: 252 211 77;
+    --primary-foreground: 17 17 19;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    @apply bg-primary/30;
+  }
+
+  /* Prevent horizontal scroll */
+  html, body {
+    overflow-x: hidden;
+  }
+
+  /* Smooth scroll behavior */
+  html {
+    scroll-behavior: smooth;
+  }
+}

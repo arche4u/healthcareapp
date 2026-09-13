@@ -1,0 +1,349 @@
+version: "3.9"
+
+# OneHealth - Full stack docker-compose
+# Run: docker-compose up --build
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Infrastructure
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: onehealth-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-onehealth}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-onehealth}
+      POSTGRES_DB: ${DB_NAME:-onehealth}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.py:/docker-entrypoint-initdb.d/init_db.py:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-onehealth} -d ${DB_NAME:-onehealth}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - onehealth-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: onehealth-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - onehealth-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: onehealth-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-onehealth}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-onehealth123}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - onehealth-network
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Gateway / Reverse Proxy (Caddy - auto HTTPS)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: onehealth-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - ACME_AGREE=true
+    depends_on:
+      - web
+      - auth-svc
+      - identity-svc
+      - dashboard-svc
+      - intake-ai-svc
+      - reminder-svc
+      - prediction-svc
+    networks:
+      - onehealth-network
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Backend Services
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  auth-svc:
+    build:
+      context: ./services/auth-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-auth-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - JWT_ISSUER=onehealth-auth
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/auth-svc:/app
+      - ./shared:/app/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "5000"
+
+  identity-svc:
+    build:
+      context: ./services/identity-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-identity-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/identity-svc:/app
+      - ./shared:/app/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "5001"
+
+  dashboard-svc:
+    build:
+      context: ./services/dashboard-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-dashboard-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_AUTH_URL=http://localhost/auth
+      - NODE_ENV=development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "3001"
+
+  intake-ai-svc:
+    build:
+      context: ./services/intake-ai-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-intake-ai-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - OLLAMA_HOST=http://ollama:11434
+      - WHISPER_HOST=http://whisper:9000
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/intake-ai-svc:/app
+      - ./shared:/app/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "5002"
+
+  reminder-svc:
+    build:
+      context: ./services/reminder-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-reminder-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - SMS_PROVIDER=stub
+      - IVR_PROVIDER=stub
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/reminder-svc:/app
+      - ./shared:/app/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "5003"
+
+  prediction-svc:
+    build:
+      context: ./services/prediction-svc
+      dockerfile: Dockerfile
+    container_name: onehealth-prediction-svc
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/prediction-svc:/app
+      - ./shared:/app/shared:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    expose:
+      - "5004"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # AI Services (optional - for Phase 3+)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: onehealth-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - onehealth-network
+    profiles:
+      - ai
+
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: onehealth-whisper
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=whisper
+    ports:
+      - "9000:9000"
+    networks:
+      - onehealth-network
+    profiles:
+      - ai
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Frontend (Web - Landing + Patient PWA)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: onehealth-web
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_AUTH_URL=http://localhost/auth
+      - NODE_ENV=development
+      - NVIDIA_NIM_API_KEY=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
+    depends_on:
+      - auth-svc
+    networks:
+      - onehealth-network
+    expose:
+      - "3000"
+
+  admin-web:
+    build:
+      context: ./admin-web
+      dockerfile: Dockerfile
+    container_name: onehealth-admin-web
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_AUTH_URL=http://localhost/auth
+      - NODE_ENV=development
+      - NVIDIA_NIM_API_KEY=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
+    ports:
+      - "3002:3000"
+    depends_on:
+      - auth-svc
+    networks:
+      - onehealth-network
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Database initialization (runs once on first startup)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  init-db:
+    build:
+      context: .
+      dockerfile: Dockerfile.init
+    container_name: onehealth-init-db
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-onehealth}:${DB_PASSWORD:-onehealth}@postgres:5432/${DB_NAME:-onehealth}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - onehealth-network
+    profiles:
+      - init
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+  ollama_data:
+
+networks:
+  onehealth-network:
+    driver: bridge
